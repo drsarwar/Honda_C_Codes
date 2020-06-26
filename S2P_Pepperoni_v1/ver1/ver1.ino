@@ -1,3 +1,13 @@
+/*************************
+Date: July 23, 2019
+Board: Pizza PCB (12 pads on the PCB) 
+Purpose: To test directly applying the sensor on the PCB
+Description: This code cycles through 12 electrodes on the PCB. 8 for pressure + 4 for shear and pressure 
+Credits: Neil 
+Mods: Nima
+**************************/
+
+
 #include <Wire.h>
 
 #define I2C_ADDRESS  0x48 //0x90 shift one to the right
@@ -7,16 +17,6 @@
 #define REGISTER_EXC_SETUP 0x09
 #define REGISTER_CONFIGURATION 0x0A
 #define RESET_ADDRESS 0xBF
-
-//FDC constant
-#define FDC_I2C_ADDRESS 0x50
-#define FDC_RESET_ADDRESS 0x80
-
-#define REG_MEAS1_MSB 0x00
-#define REG_MEAS1_LSB 0x01
-#define REG_CONF_MEAS1 0x08
-#define REG_FDC_CONF 0x0C
-#define REG_OFFSET1 0x0D
 
 #define VALUE_UPPER_BOUND 16000000L
 #define VALUE_LOWER_BOUND 0xFL
@@ -31,18 +31,17 @@
 #define mux_1addr_1 10
 #define mux_1addr_0 9
 #define mux_2addr_0 8
-#define mux_2addr_1 6
-#define PIN_COVER_MUX 7
+
+const int num_sensors = 12; //The maximum number of sensors ex. 4x1 (4) OR 4x4 (16) 
+    //5 sensors means 4 pads and one proximity
 
 long value = 0; //Unconverted value from CDC
 
 float converted = 0; //Converted pF value
-
 int mux1_A0; //1 bit value to send to mux control pin
 int mux1_A1;
 int mux1_A2;
 int mux1_A3;
-int mux2_A1;
 int mux2_A0;
 
 int state_mux1 = 1; // 2 bit state of mux1
@@ -57,7 +56,7 @@ long BASELINE [4]; //Baseline capacitance of each position stored here, initiall
                    //then becomes a running average of 4 sets of data
                    
 unsigned char current_sensor = 0; //Used as a counter to cycle through the 12 sensors.
-//unsigned char address[4] = {B0000, B0001, B0010, B0011}; //Makes it easier to print baseline addresses TODO: what is this?
+unsigned char address[4] = {B0000, B0001, B0010, B0011}; //Makes it easier to print baseline addresses TODO: what is this?
 
 unsigned char SPDTAddressRegA[16] = {B00000000, B00000000, B00000010, B00000000, \
 									 B00000000, B00000000, B00000000, B00000000, \
@@ -85,8 +84,6 @@ void setup()
 	pinMode(mux_1addr_2, OUTPUT);
 	pinMode(mux_1addr_3, OUTPUT);
 	pinMode(mux_2addr_0, OUTPUT);
-	pinMode(PIN_COVER_MUX, OUTPUT);
-	pinMode(mux_2addr_1, OUTPUT);
 	DDRA = B11111111;  // sets Arduino pins 22 to 29 as outputs
 	DDRC = B11111111;  // sets Arduino pins 30 to 37 as outputs
 
@@ -96,11 +93,6 @@ void setup()
 	//Set up baud rate for serial communication to com port
 	Serial.begin(9600);
 
-	delay(1);
-	//config_fdc
-	config_fdc();
-
-	//config_cdc:
 	//Start i2c cycle
 	Wire.beginTransmission(I2C_ADDRESS);
 	//Reset the device
@@ -113,7 +105,7 @@ void setup()
 	writeRegister(I2C_ADDRESS, REGISTER_EXC_SETUP, _BV(3) | _BV(1) | _BV(0));
 	writeRegister(I2C_ADDRESS, REGISTER_CAP_SETUP, _BV(7)); //Cap setup reg - cap enabled
 	delay(10);
-	writeRegister(I2C_ADDRESS, REGISTER_CONFIGURATION, _BV(0)); //Continuous mode - changed to quickest speed
+	writeRegister(I2C_ADDRESS,REGISTER_CONFIGURATION, _BV(0)); //Continuous mode - changed to quickest speed
 
 
 	//Prevent overshoot of the first BASELINE value
@@ -128,10 +120,8 @@ void loop()
 	if(current_sensor > 7)
 		current_sensor = current_sensor-4;
 
-
 	//Cycle mux to next input
 	mux();
-
 
 	//Read capacitance.
 	value = readValue();
@@ -161,18 +151,6 @@ void loop()
 		//  	Serial.print("  ");
 		//  	Serial.print(state_mux1-1);
 	  	Serial.print("\n");
-
-	  	if(current_sensor == 11) {
-	  		writeRegister(I2C_ADDRESS, REGISTER_CAP_SETUP, 0);
-	  		digitalWrite(PIN_COVER_MUX, LOW);
-	  		delay(10);
-
-	  		Serial.print("(1100)");
-			Serial.println(FDC_readValue(), 4);
-			
-			digitalWrite(PIN_COVER_MUX, HIGH);
-			writeRegister(I2C_ADDRESS, REGISTER_CAP_SETUP, _BV(7));
-		}
 
 	delay(15);  //Need a delay here or data will be transmitted out of order (or not at all)
 	//current_sensor++;   //Increment to the next sensor
@@ -204,7 +182,7 @@ long readValue()
 //Nima's MUX
 void mux()
 {
-  		//state_mux1=16;
+  		//state_mux1=10;
 	mux1_A0 = bitRead(state_mux1Mapping[state_mux1-1], 0);
 	mux1_A1 = bitRead(state_mux1Mapping[state_mux1-1], 1);
 	mux1_A2 = bitRead(state_mux1Mapping[state_mux1-1], 2);
@@ -233,18 +211,12 @@ void mux()
     
 		if(state_mux1 <= 4){
 		  	mux2_A0 = 1;
-		  	mux2_A1 = 0;
 		}
-		else if (state_mux1 >= 10 && state_mux1 <=13){
-		  	mux2_A0 = 0;
-		  	mux2_A1 = 0;
-		} 
 		else {
-			mux2_A0 = 0;
-		  	mux2_A1 = 1;
+		  	mux2_A0 = 0;
 		}
+        //digitalWrite(mux_2addr_0, 1);
   		digitalWrite(mux_2addr_0, mux2_A0);
-        digitalWrite(mux_2addr_1, mux2_A1);
  	}
 
     /***************************
@@ -272,71 +244,37 @@ void mux()
     //state_mux1=1;
 }
 
-void config_fdc()
-{
-	Wire.begin();																// Set up I2C for operation
-	Serial.begin(9600);															// Set up baud rate for serial communication to com port
-	writeRegister_Word(FDC_I2C_ADDRESS, REG_FDC_CONF, FDC_RESET_ADDRESS, 0x00); // Reset device
-	delay(100);																	// Wait a tad for reboot
+/*
+//Nima's MUX
+void shearMux()
+{    
+	int state ; 
 
-	/* Measurement Configuration */
-	// +C input: CIN1 -- enable CAPDAC --  0pF offset
-	// if offset = 6, c = 0;  if offset = 10, c approx. = -16
-	/// Offset range: 0 <= offset < 32
-	uint8_t offset_c = 10; 
-	// Measurement configuration registers: REG_CONF_MEAS1 = 0x1000
-	// [15:13] = 0b000
-	//		select positive input as channel 1
-	// [12:10] = 0b100
-	//		select negative input as CAPDAC
-	// [9:5]   = 0b00000
-	// 		reserve for CAPDAC setting; 1|0 = 1; 0|0 = 0;
-	// [4:0]   = 0b00000
-	// 		reserved, always 0 and read only
-	uint16_t conf = 0x1000;
-	// "(offset_c & 0x1F)" ensures it has only lower 5 bits, other bits are all 0
-	// " << 5" moves the offset_c value to its right place
-	// " |= " merges the offset value to the configuration
-	conf |= (offset_c & 0x1F) << 5;
-	writeRegister_Word(FDC_I2C_ADDRESS, REG_CONF_MEAS1, (conf >> 8) & 0xFF, conf & 0xFF);
-	delay(20);
+	digitalWrite(mux_2addr_0, 0);
 
-	/* Trigger Configuration */
-	// Normal operation -- msr rate: 400 S/s -- repeat enabled -- msr 1 enabled
-	writeRegister_Word(FDC_I2C_ADDRESS, REG_FDC_CONF, 0x0D, 0x80);
-	delay(20);
-
-	/* Offset Configuration */
-	// Integer part is from bit 11 to 15
-	// 0x20 means offset +4pF
-	// 0xF7 means offset -2pF
-	// 0xB8 means offset -9pF
-	// 0x98 means offset -13pF
-	writeRegister_Word(FDC_I2C_ADDRESS, REG_OFFSET1, 0x98, 0x00);
-	delay(20);
-}
-
-float FDC_readValue()
-{
-	digitalWrite(PIN_COVER_MUX, LOW);
-	delay(15);
-
-	unsigned int status = 0;
-	long raw_data;
-
-	/* Wait for Measurement Completion */
-	// Data ready when bit[3] of REG_FDC_CONF = 1
-	while (!(0x8 == (status & 0x8)))
-	{
-		status = readRegister(FDC_I2C_ADDRESS, REG_FDC_CONF); // Wait for the next conversion
-		delay(10);
+	if(current_sensorMapping[current_sensor] == 0){
+		state = 1; 
+	}
+	else if(current_sensorMapping[current_sensor] == 1){
+		state = 9;
+	}
+	else if(current_sensorMapping[current_sensor] == 2){
+		state = 12;
+	}
+	else{
+		state =15;
 	}
 
-	raw_data = readLong(FDC_I2C_ADDRESS, REG_MEAS1_MSB); // Size of unsigned long: 4 bytes (32 bits)
-	raw_data >>= 8;										 // Have 1 byte too many - have to get rid of it - data is 24 bit
+	mux1_A0 = bitRead(state, 0);
+	mux1_A1 = bitRead(state, 1);
+	mux1_A2 = bitRead(state, 2);
+	mux1_A3 = bitRead(state, 3);
 
-	digitalWrite(PIN_COVER_MUX, HIGH); //set the mux open via channel 4
-	delay(15);
+	digitalWrite(mux_1addr_0, mux1_A0);
+	digitalWrite(mux_1addr_1, mux1_A1);
+	digitalWrite(mux_1addr_2, mux1_A2);
+	digitalWrite(mux_1addr_3, mux1_A3);
 
-	return (float)raw_data / 524288;
+	return;
 }
+*/
