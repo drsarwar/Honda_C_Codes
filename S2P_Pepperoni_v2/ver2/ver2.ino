@@ -160,7 +160,7 @@ void loop()
 	  	Serial.print("\n");
 
 	  	if(current_sensor == 11) {
-	  		writeRegister(I2C_ADDRESS, REGISTER_CAP_SETUP, 0);
+	  		writeRegister(I2C_ADDRESS, REGISTER_CAP_SETUP, 0); //this is where the CDC is turned off
 	  		digitalWrite(PIN_COVER_MUX, LOW);
 	  		delay(10);
 
